@@ -844,6 +844,7 @@ class DatasetDict(dict):
         >>> ds = ds.map(add_prefix, num_proc=4)
         ```
         """
+        logger.info("Dataset dict map called")
         self._check_values_type()
         if cache_file_names is None:
             cache_file_names = {k: None for k in self}

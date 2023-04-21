@@ -1348,12 +1348,22 @@ def copyfunc(func):
 
 Y = TypeVar("Y")
 
+_sentinel = object()
 
 def _write_generator_to_queue(queue: queue.Queue, func: Callable[..., Iterable[Y]], kwargs: dict) -> int:
-    for i, result in enumerate(func(**kwargs)):
-        queue.put(result)
-    return i
+    try:
+        for item in func(**kwargs):
+            logger.info("Put item")
+            queue.put(item)
+    except Exception as e:
+        queue.put(e)
+    finally:
+        queue.put(_sentinel) # Sentinel
 
+def error_handler(error):
+    logger.error(error)
+    queue.put(error)
+    raise error
 
 def iflatmap_unordered(
     pool: Union[multiprocessing.pool.Pool, multiprocess.pool.Pool],
@@ -1365,13 +1375,27 @@ def iflatmap_unordered(
     with manager_cls() as manager:
         queue = manager.Queue()
         async_results = [
-            pool.apply_async(_write_generator_to_queue, (queue, func, kwargs)) for kwargs in kwargs_iterable
+            pool.apply_async(_write_generator_to_queue, (queue, func, kwargs), error_callback=error_handler) for kwargs in kwargs_iterable
         ]
-        while True:
-            try:
-                yield queue.get(timeout=0.05)
-            except Empty:
-                if all(async_result.ready() for async_result in async_results) and queue.empty():
-                    break
+        logger.info("Before loop")
+        # while True:
+        #     try:
+        #         logger.info("queue.get")
+        #         item = queue.get(timeout=0.05)
+        #         if item == _sentinel: # Check Sentinel
+        #             continue
+                
+        #         # Check if the item is an exception, and raise it if it is
+        #         if isinstance(item, BaseException):
+        #             raise item
+                
+        #         yield item
+        #     except Empty:
+        #         if all(async_result.ready() for async_result in async_results) and queue.empty():
+        #             break
+        #     except Exception as e:
+        #         logger.error(e)
+        #         break
+        logger.info("After loop")
         # we get the result in case there's an error to raise
         [async_result.get() for async_result in async_results]

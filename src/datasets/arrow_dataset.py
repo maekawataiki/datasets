@@ -2882,6 +2882,8 @@ class Dataset(DatasetInfoMixin, IndexableMixin, TensorflowDatasetMixin):
         >>> ds = ds.map(add_prefix, num_proc=4)
         ```
         """
+        logger.info("Map function")
+
         if keep_in_memory and cache_file_name is not None:
             raise ValueError("Please use either `keep_in_memory` or `cache_file_name` but not both.")
 
@@ -3038,7 +3040,9 @@ class Dataset(DatasetInfoMixin, IndexableMixin, TensorflowDatasetMixin):
                 validate_fingerprint(new_fingerprint)
                 return new_fingerprint
 
+            logger.info("prev_env Deep Copy")
             prev_env = deepcopy(os.environ)
+            logger.info("prev_env Deep Copy Ended")
             # check if parallelism if off
             # from https://github.com/huggingface/tokenizers/blob/bb668bc439dc34389b71dbb8ce0c597f15707b53/tokenizers/src/utils/parallelism.rs#L22
             if prev_env.get("TOKENIZERS_PARALLELISM", "false").lower() not in (
@@ -3052,10 +3056,12 @@ class Dataset(DatasetInfoMixin, IndexableMixin, TensorflowDatasetMixin):
             ):
                 logger.warning("Setting TOKENIZERS_PARALLELISM=false for forked processes.")
             os.environ["TOKENIZERS_PARALLELISM"] = "false"
+            logger.info("shards = ")
             shards = [
                 self.shard(num_shards=num_proc, index=rank, contiguous=True, keep_in_memory=keep_in_memory)
                 for rank in range(num_proc)
             ]
+            logger.info("kwargs_per_job = ...")
             kwargs_per_job = [
                 {
                     **dataset_kwargs,
@@ -3068,6 +3074,7 @@ class Dataset(DatasetInfoMixin, IndexableMixin, TensorflowDatasetMixin):
                 for rank in range(num_shards)
             ]
 
+            logger.info("transformed_shards = ...")
             transformed_shards = [None] * num_shards
             for rank in range(num_shards):
                 try:
@@ -3084,7 +3091,9 @@ class Dataset(DatasetInfoMixin, IndexableMixin, TensorflowDatasetMixin):
                     logger.info(
                         f"Reprocessing {len(kwargs_per_job)}/{num_shards} shards because some of them were missing from the cache."
                     )
+                logger.info("outside pool")
                 with Pool(len(kwargs_per_job)) as pool:
+                    logger.info("inside pool")
                     os.environ = prev_env
                     logger.info(f"Spawning {num_proc} processes")
                     with logging.tqdm(
@@ -3094,9 +3103,11 @@ class Dataset(DatasetInfoMixin, IndexableMixin, TensorflowDatasetMixin):
                         leave=False,
                         desc=(desc or "Map") + f" (num_proc={num_proc})",
                     ) as pbar:
+                        logger.info("before for rank...")
                         for rank, done, content in iflatmap_unordered(
                             pool, Dataset._map_single, kwargs_iterable=kwargs_per_job
                         ):
+                            logger.info("after for rank...")
                             if done:
                                 shards_done += 1
                                 logger.debug(f"Finished processing shard number {rank} of {num_shards}.")
@@ -3112,6 +3123,7 @@ class Dataset(DatasetInfoMixin, IndexableMixin, TensorflowDatasetMixin):
                 None not in transformed_shards
             ), f"Failed to retrieve results from map: result list {transformed_shards} still contains None - at least one worker failed to return its results"
             logger.info(f"Concatenating {num_proc} shards")
+            logger.info("result = _concatenate_map_style_dataset(...)")
             result = _concatenate_map_style_datasets(transformed_shards)
             # update fingerprint if the dataset changed
             if any(
